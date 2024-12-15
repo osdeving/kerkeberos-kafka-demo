@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka-broker:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka-broker
+    depends_on:
+      - zookeeper
+      - kerberos-kdc
+    volumes:
+      - ./kafka/init-kafka.sh:/etc/kafka/init-kafka.sh
+      - ./kafka/server.properties:/etc/kafka/server.properties
+      - ./kafka/kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf
+      - ./keytabs/kafka_broker.keytab:/etc/kafka/kafka_broker.keytab # Keytab compartilhada
+      - ./client/krb5.conf:/etc/krb5.conf # Adiciona o krb5.conf ao broker
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: SASL_PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://localhost:9092
+      KAFKA_SASL_ENABLED_MECHANISMS: GSSAPI
+      KAFKA_INTER_BROKER_LISTENER_NAME: SASL_PLAINTEXT
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf"
+    entrypoint: ["/etc/kafka/init-kafka.sh"]
+
+  kerberos-kdc:
+    build:
+      context: ./kdc
+    container_name: kerberos-kdc
+    ports:
+      - "88:88"
+      - "464:464"
+    volumes:
+      - ./kdc:/etc/krb5kdc
+      - ./keytabs:/etc/krb5kdc/output # Volume para compartilhar keytabs
+    environment:
+      REALM: EXAMPLE.COM
+      ADMIN_PASSWORD: adminpassword
+    entrypoint: ["/etc/krb5kdc/init-kdc.sh"]
+
+  kafka-client:
+    build:
+      context: ./client
+    container_name: kafka-client
+    depends_on:
+      - kafka-broker
+    volumes:
+      - ./client:/etc/kafka-client
+      - ./keytabs/client.keytab:/etc/kafka-client/client.keytab # Keytab compartilhada
+      - ./client/krb5.conf:/etc/krb5.conf # Adiciona o krb5.conf ao client
+    environment:
+      - KAFKA_OPTS=-Djava.security.auth.login.config=/etc/kafka-client/kafka_client_jaas.conf
+    entrypoint: ["/etc/kafka-client/init-client.sh"]
